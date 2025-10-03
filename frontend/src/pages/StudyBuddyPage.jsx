@@ -1,121 +1,75 @@
 import React, { useState, useEffect } from "react";
 
-export default function StudyBuddy() {
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [formattedAnswer, setFormattedAnswer] = useState("");
-
-  const buildFormattedText = (data) => {
-    if (!data) return "";
-
-    if (typeof data === "string") {
-      return data;
-    }
-
-    if (data.text) {
-      return data.text;
-    }
-
-    const sections = [];
-
-    if (data.definition) {
-      sections.push(`Definition:\n${data.definition}`);
-    }
-
-    if (data.simple_explanation) {
-      sections.push(`Simple Explanation:\n${data.simple_explanation}`);
-    }
-
-    if (Array.isArray(data.examples) && data.examples.length > 0) {
-      const examples = data.examples
-        .map((example, index) => `${index + 1}. ${example}`)
-        .join("\n");
-      sections.push(`Examples:\n${examples}`);
-    }
-
-    if (data.formula) {
-      sections.push(`Formula:\n${data.formula}`);
-    }
-
-    if (Array.isArray(data.key_takeaways) && data.key_takeaways.length > 0) {
-      const takeaways = data.key_takeaways.map((point) => `- ${point}`).join("\n");
-      sections.push(`Key Takeaways:\n${takeaways}`);
-    }
-
-    if (!sections.length) {
-      return JSON.stringify(data, null, 2);
-    }
-
-    return sections.join("\n\n");
-  };
-
-  const renderAnswerSections = (text) => {
-    return text
+const AnswerSection = ({ text }) => {
+  if (!text) return null;
+  return (
+    <div className="grid gap-4">
+      {text
       .split(/\n{2,}/)
       .filter(Boolean)
       .map((block, index) => {
         const lines = block.split("\n");
         const [firstLine, ...rest] = lines;
-        const hasTitle = firstLine.includes(":");
-        const [title, ...titleContent] = hasTitle ? firstLine.split(":") : [firstLine];
-        const bodyLines = hasTitle
-          ? [titleContent.join(":").trim(), ...rest].filter((line) => line.trim())
-          : lines.filter((line) => line.trim());
+        const isTitleBold = firstLine.startsWith("**") && firstLine.endsWith("**");
+        const title = isTitleBold ? firstLine.slice(2, -2) : firstLine;
+        const bodyLines = isTitleBold ? rest : lines;
 
         const trimmedLines = bodyLines.map((line) => line.trim());
-        const isBulletList =
-          trimmedLines.length > 1 && trimmedLines.every((line) => line.startsWith("- "));
-        const isNumberedList =
-          trimmedLines.length > 1 && trimmedLines.every((line) => /^\d+\.\s/.test(line));
+        const isBulletList = trimmedLines.length > 0 && trimmedLines.every((line) => line.startsWith("• "));
 
         const renderBody = () => {
           if (isBulletList) {
             return (
-              <ul className="list-disc list-inside space-y-1">
+              <ul className="list-disc list-inside space-y-1 pl-2">
                 {trimmedLines.map((line, idx) => (
-                  <li key={idx}>{line.replace(/^-\s*/, "").trim()}</li>
+                  <li key={idx}>{line.replace(/^•\s*/, "").trim()}</li>
                 ))}
               </ul>
             );
           }
 
-          if (isNumberedList) {
-            return (
-              <ol className="list-decimal list-inside space-y-1">
-                {trimmedLines.map((line, idx) => (
-                  <li key={idx}>{line.replace(/^\d+\.\s*/, "").trim()}</li>
-                ))}
-              </ol>
-            );
-          }
-
           return trimmedLines.map((content, contentIndex) => (
-            <p key={contentIndex}>{content}</p>
+            <p key={contentIndex} dangerouslySetInnerHTML={{ __html: content.replace(/\$(.*?)\$/g, '<i class="font-mono not-italic text-emerald-300">$1</i>') }} />
           ));
         };
 
         return (
-          <div key={index} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-            {hasTitle && (
-              <h3 className="text-lg font-semibold text-blue-600 mb-2">{title.trim()}</h3>
+          <div key={index} className="bg-gray-800 border border-gray-700 rounded-lg p-4 shadow-sm">
+            {isTitleBold && (
+              <h3 className="text-lg font-semibold text-blue-400 mb-2">{title}</h3>
             )}
-            <div className="space-y-2 text-gray-700">{renderBody()}</div>
+            <div className="space-y-2 text-gray-300">{renderBody()}</div>
           </div>
         );
-      });
-  };
+      })}
+    </div>
+  );
+};
+
+const HistoryItem = ({ item }) => {
+  return (
+    <details className="mb-4 bg-gray-800 rounded-lg border border-gray-700 shadow-sm overflow-hidden">
+      <summary className="p-3 font-semibold cursor-pointer hover:bg-gray-700">
+        Q: {item.question}
+      </summary>
+      <div className="border-t border-gray-700 p-3 text-sm text-gray-400 space-y-2">
+        <AnswerSection text={item.answer.text} />
+      </div>
+    </details>
+  );
+};
+
+export default function StudyBuddy() {
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Load history from localStorage on first load
   useEffect(() => {
     const savedHistory = localStorage.getItem("studyBuddyHistory");
     if (savedHistory) {
-      const parsed = JSON.parse(savedHistory);
-      const normalized = parsed.map((item) => ({
-        ...item,
-        formattedText: item.formattedText || buildFormattedText(item.answer),
-      }));
-      setHistory(normalized);
+      setHistory(JSON.parse(savedHistory));
     }
   }, []);
 
@@ -126,6 +80,7 @@ export default function StudyBuddy() {
 
   const handleAsk = async () => {
     if (!question.trim()) return;
+    setIsLoading(true);
 
     try {
       const res = await fetch("http://127.0.0.1:8000/studybuddy", {
@@ -135,26 +90,30 @@ export default function StudyBuddy() {
       });
 
       const data = await res.json();
-      const textAnswer = buildFormattedText(data);
-
+      if (res.ok) {
       setAnswer(data);
-      setFormattedAnswer(textAnswer);
 
-      const newEntry = { question, answer: data, formattedText: textAnswer };
+      const newEntry = { question, answer: data };
       setHistory([newEntry, ...history]); // latest on top
       setQuestion("");
+      } else {
+        setAnswer({ text: `**Error:**\n${data.error || 'An unknown error occurred.'}` });
+      }
     } catch (error) {
       console.error("Error:", error);
+      setAnswer({ text: `**Error:**\nCould not connect to the server. Please try again later.` });
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex gap-6 p-6">
+    <div className="flex gap-6 p-4">
       {/* Left: Current Question/Answer */}
-      <div className="w-2/3 bg-white rounded-xl shadow-lg p-6">
-        <h1 className="text-2xl font-bold mb-4">📚 Study Buddy</h1>
+      <div className="w-2/3 bg-gray-900 rounded-xl shadow-2xl p-6 border border-gray-700">
+        <h1 className="text-3xl font-bold mb-4 text-gray-100">🎓 Study Buddy</h1>
         <textarea
-          className="w-full p-3 border rounded-md"
+          className="w-full p-3 border border-gray-600 rounded-md bg-gray-800 text-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
           rows="3"
           placeholder="Ask me anything about math, science, etc..."
           value={question}
@@ -162,49 +121,49 @@ export default function StudyBuddy() {
         />
         <button
           onClick={handleAsk}
-          className="mt-3 px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          disabled={isLoading}
+          className="mt-3 w-28 h-10 flex items-center justify-center px-5 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-blue-500 transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed"
         >
-          Ask
+          {isLoading ? (
+            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          ) : (
+            "Ask"
+          )}
         </button>
 
-        {formattedAnswer && (
+        {answer && (
           <div className="mt-6 space-y-3">
-            <h2 className="text-xl font-semibold">✨ Answer</h2>
-            <div className="grid gap-4">
-              {renderAnswerSections(formattedAnswer)}
-            </div>
+            <h2 className="text-2xl font-semibold text-gray-200 border-b border-gray-700 pb-2">✨ Answer</h2>
+            <AnswerSection text={answer.text} />
           </div>
         )}
       </div>
 
       {/* Right: History */}
-      <div className="w-1/3 bg-gray-50 rounded-xl shadow-md p-4 overflow-y-auto h-[80vh]">
-        <h2 className="text-lg font-bold mb-3">🕘 History</h2>
-        {history.length === 0 ? (
-          <p className="text-gray-500">No past questions yet.</p>
-        ) : (
-          history.map((item, i) => (
-            <div
-              key={i}
-              className="mb-4 p-3 bg-white rounded-lg border shadow-sm space-y-2"
-            >
-              <p className="font-semibold">Q: {item.question}</p>
-              <div className="border-t border-gray-200 pt-2 text-sm text-gray-600 space-y-2">
-                {renderAnswerSections(item.formattedText)}
-              </div>
-            </div>
-          ))
-        )}
+      <div className="w-1/3 bg-gray-900 rounded-xl shadow-2xl p-4 border border-gray-700 flex flex-col h-[calc(100vh-2rem)]">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-xl font-bold text-gray-100">🕘 History</h2>
+          <button
+            onClick={() => {
+              setHistory([]);
+              localStorage.removeItem("studyBuddyHistory");
+            }}
+            className="px-3 py-1 text-sm bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-red-500 transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-grow">
+          {history.length === 0 ? (
+            <p className="text-gray-500 text-center mt-4">No past questions yet.</p>
+          ) : (
+            history.map((item, i) => <HistoryItem key={i} item={item} />)
+          )}
+        </div>
       </div>
-      <button
-        onClick={() => {
-          setHistory([]);
-          localStorage.removeItem("studyBuddyHistory");
-        }}
-        className="mt-3 ml-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-      >
-        Clear History
-      </button>
     </div>
   );
 }
